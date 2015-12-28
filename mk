@@ -85,7 +85,7 @@ let run_status cmd =
 (** [has_package name] returns true if the package [name] is known to
     ocamlfind. *)
 let has_package name =
-  run_status (sprintf "ocamlfind query %s" name) = 0
+  run_status (sprintf "ocamlfind query %s >/dev/null 2>&1" name) = 0
 
 (** [ocb ?quiet cmd] runs the ocamlfind command [cmd]. If [quiet] is true the
     -quiet flag is given to ocamlbuild, which causes normal output to be
