@@ -286,7 +286,15 @@ let rules =
 
           let () = UTop_main.main ()
 
-      ... to have your top be based on UTop. *)
+      ... to have your top be based on UTop (this requires utop to be in the
+      dependencies). You should also create a file called .ocamlinit in the
+      root of the project (if that's where you're going to be running the top)
+      with the contents:
+   
+          #thread
+          #directory "src/_build"
+   
+      ... to set up the top properly. *)
    ("top",
     Build,
     (fun () ->
