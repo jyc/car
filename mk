@@ -28,7 +28,6 @@
    https://github.com/jonathanyc/mk *)
 
 let src_dir = "src"
-let top_name = "my_project_top"
 let project = "my_project"
 let package = "my-project"
 
@@ -263,7 +262,7 @@ let rules =
     (fun () ->
        ocb "-clean" ;
        chdir ".." ;
-       run (sprintf "rm -f main.native main.d.byte %s.top %s.docdir" top_name project) ;
+       run (sprintf "rm -f main.native main.d.byte %s.top %s.docdir" project project) ;
        chdir src_dir));
 
    (* byte builds main.d.byte using ocamlbuild from a src/main.ml file. *)
@@ -280,9 +279,10 @@ let rules =
        ocb "main.native" ;
        install "main.native"));
 
-   (* top builds a custom toplevel top_name.top containing all the modules in
+   (* top builds a custom toplevel, [project].top containing all the modules in
       the project except for Main and *_test.
-      You should add a file called <project>_top.ml containing the following line:
+      You should add a file called [mcase project]_top.ml containing the
+      following line:
 
           let () = UTop_main.main ()
 
@@ -298,10 +298,10 @@ let rules =
    ("top",
     Build,
     (fun () ->
-       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" top_name)
+       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
          (fun () ->
-            ocb (sprintf "%s.top" top_name) ;
-            install (sprintf "%s.top" top_name)))) ;
+            ocb (sprintf "%s.top" project) ;
+            install (sprintf "%s.top" project)))) ;
 
    (* doc runs ocamldoc on all of the modules in your project except for *_test
       modules. The generated documentation is located at <project>.docdir. *)
@@ -313,8 +313,8 @@ let rules =
             ocb (sprintf "%s.docdir/index.html" project) ;
             install (sprintf "%s.docdir" project))));
 
-   (* lib installs all of the modules in your project except for Main and
-      *_test modules as an ocamlfind package named [package]. *)
+   (* lib installs all of the modules in your project except for Main, *_test
+      modules, and [mcase project]_top as an ocamlfind package named [package]. *)
    ("lib",
     Install,
     (fun () ->
@@ -323,7 +323,9 @@ let rules =
          run (sprintf "ocamlfind remove %s" package)
        else () ;
 
-       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mllib" project)
+       with_module_list
+         ~excludes:["Main"; mcase project ^ "_top"]
+         ~dest:(sprintf "%s.mllib" project)
          (fun () ->
             (* Bytecode. *)
             ocb (sprintf "%s.cma" project) ;
