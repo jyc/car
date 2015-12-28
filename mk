@@ -24,7 +24,8 @@
            ...
 
    Licensed under the BSD 2-Clause License.
-   Copyright 2015 Jonathan Y. Chan <jyc@fastmail.fm> *)
+   Copyright 2015 Jonathan Y. Chan <jyc@fastmail.fm>
+   https://github.com/jonathanyc/mk *)
 
 let src_dir = "src"
 let top_name = "my_project_top"
