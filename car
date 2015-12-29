@@ -26,6 +26,20 @@ open Pervasives
 let src_dir = "src"
 let config_path = "car.toml"
 
+type rule_group =
+  | Build
+  | Test
+
+  | Destroy
+  | Splice
+  | Install
+
+  | Print
+
+(** [scary_groups] is a list of rule groups that shouldn't be run without being
+    explicitly specified, e.g. clean, lib. [rule_all] does not run them. *)
+let scary_groups = [Destroy; Splice; Install; Print]
+
 (** [config] represents the configuration for a project using car, stored in
     TOML file at [config_path].
     Note: if this format changes, make sure to modify [init] accordingly! *)
@@ -37,11 +51,18 @@ type config = {
 
 let (&) f g x = f (g x)
 
+(** [is_scary group] returns [true] if a group is scary.
+    @see [scary_groups] *)
+let is_scary group = List.mem group scary_groups
+
 (** [error s] prints [s] colored red to stderr before exiting the program. *)
 let error s =
   ANSITerminal.(prerr_string [red] s) ;
   prerr_endline "" ;
   exit 1
+
+(* Can't seem to abstract these functions without confusing the compiler / type
+   system about which strings are supposed to be format strings. *)
 
 (** [action verb format args*] prints [verb] colored green followed by [printf
     format args*]. It is used to display big actions. *)
@@ -49,6 +70,16 @@ let action verb =
   ksprintf
     (fun s ->
        ANSITerminal.(print_string [green] verb) ;
+       print_endline (" " ^ s) ;
+       flush stdout)
+
+(** [scary verb format args*] prints [verb] colored yellow followed by [printf
+    format args*]. It is used to display big actions that might have
+    unusually destructive effects. *)
+let scary verb = 
+  ksprintf
+    (fun s ->
+       ANSITerminal.(print_string [yellow] verb) ;
        print_endline (" " ^ s) ;
        flush stdout)
 
@@ -80,9 +111,9 @@ let load_config () =
   with e ->
     error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
-(** If [log_commands] is true, we print out the commands we are exiting through
-    [run] and [run_status] before executing them.
-    It can be toggled directly or around a block of code using [with_log_commands]. *)
+(** If [log_commands] is [true], we print out the commands we are exiting
+    through [run] and [run_status] before executing them. It can be toggled
+    directly or around a block of code using [with_log_commands]. *)
 let log_commands = ref true
 
 (** [with_log_commands x f] sets [log_commands] to [x] before calling [f ()].
@@ -94,9 +125,9 @@ let with_log_commands x f =
   log_commands := prev
 
 (** [run cmd] runs the command [cmd] using [system] (i.e. it is interpreted
-    using /bin/sh). If [log_commands] is true, the command is output before it
-    is run. If the command returns a non-zero exit code or is killed by / exits
-    due to a signal, we print an error is printed to stderr and [exit 1]. *)
+    using /bin/sh). If [log_commands] is [true], the command is output before
+    it is run. If the command returns a non-zero exit code or is killed by /
+    exits due to a signal, we print an error is printed to stderr and [exit 1]. *)
 let run cmd =
   if !log_commands then
     print_endline cmd
@@ -120,12 +151,12 @@ let run_status cmd =
   | _ ->
     error @@ sprintf "\nCommand failed: '%s' exited abnormally." cmd
 
-(** [has_package name] returns true if the package [name] is known to
+(** [has_package name] returns [true] if the package [name] is known to
     ocamlfind. *)
 let has_package name =
   run_status (sprintf "ocamlfind query %s >/dev/null 2>&1" name) = 0
 
-(** [ocb ?quiet cmd] runs the ocamlfind command [cmd]. If [quiet] is true the
+(** [ocb ?quiet cmd] runs the ocamlfind command [cmd]. If [quiet] is [true] the
     -quiet flag is given to ocamlbuild, which causes normal output to be
     suppressed (only errors are output). The main point is that it includes the
     -use-ocamlfind flag which we need for pretty much everything. *)
@@ -142,7 +173,7 @@ let mcase s =
     (Char.uppercase s.[0])
     (String.sub s 1 (String.length s - 1))
 
-(** [check_prefix a b] returns true if [a] is a prefix of [b]. *)
+(** [check_prefix a b] returns [true] if [a] is a prefix of [b]. *)
 let check_prefix a b =
   String.length a <= String.length b &&
   String.sub b 0 (String.length a) = a
@@ -266,14 +297,6 @@ let splice_file ?(ml=false) path tag s =
 let desired_artifacts =
   [".cmi"; ".cmt"; ".ml"; ".mli"; ".cma"; ".cmxa"; ".a" ]
 
-type rule_group =
-  | Destroy
-  | Build
-  | Install
-  | Generate
-  | Test
-  | Splice
-
 (** [rules] is a alist of (name, group, procedure) tuples. Each specifies a
     subcommand for mk. For example, ./mk splice will call the procedure whose
     name is "splice". The [group] currently only affects [rule_all], which
@@ -289,7 +312,7 @@ let rules =
       new dependency. *)
    ("gen",
     "Generate a META file and dependency lists in .merlin, and _tags.",
-    Generate,
+    Splice,
     (fun { project; requires } ->
        let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
        let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) requires) in
@@ -303,6 +326,12 @@ let rules =
        splice_file "META" "META" meta (* wow such meta *) ;
        splice_file "_tags" "_tags" tags (* very tags *) ;
        splice_file ".merlin" ".merlin" merlin));
+
+   ("reqs",
+    "Print a list of the required packages listed in the config.",
+    Print,
+    (fun { requires } ->
+       List.iter print_endline requires ));
 
    (* clean deletes the binaries created by other commands. It doesn't delete
       the spliced files, beacuse it makes sense to commit those and because you
@@ -452,17 +481,25 @@ let help () =
        if n > !max_n then max_n := n)
     rules ;
 
-  let show_rule name desc =
-       ANSITerminal.(print_string [green] name) ;
-       print_endline (String.make (!max_n - String.length name + 2) ' ' ^ desc)
+  let show_rule name desc group =
+    let color =
+      if is_scary group then ANSITerminal.yellow
+      else ANSITerminal.green
+    in
+    ANSITerminal.(print_string [color] name) ;
+    print_endline (String.make (!max_n - String.length name + 2) ' ' ^ desc)
   in
 
-  show_rule "init" @@ sprintf "Create an initial %s file." config_path ;
+  show_rule "init" (sprintf "Create an initial %s file." config_path) Splice ;
 
   (* Print a listing of all the rules and their descriptions. *)
-  List.iter (fun (name, desc, _, _) -> show_rule name desc) rules ;
+  List.iter (fun (name, desc, group, _) -> show_rule name desc group) rules ;
   print_endline "" ;
-  print_endline "If you don't supply a rule, all rules will run but clean, unlib, and topgen." ;
+  Printf.printf "If you don't supply a rule, all rules will run but: %s.\n"
+    (rules
+     |> List.filter (fun (_, _, group, _) -> is_scary group)
+     |> List.map (fun (name, _, _, _) -> name)
+     |> String.concat ", ") ;
   exit 1
 
 (** [init ()] tries to initialize a config file at [config_path]. *)
@@ -481,29 +518,31 @@ let init () =
     run @@ sprintf "$EDITOR %s" config_path
   end
 
-(** [rule config name] runs the rule named [name] if it exists. If no such rule
-    exists, we print an error is printed then [exit 1]. *)
+(** [rule config name] runs the rule named [name] if it exists. If no
+    such rule exists, we print an error is printed then [exit 1]. *)
 let rule config name =
   if Filename.check_suffix name "help" then help ()
   else
     let rec find_rule = function
       | [] -> raise Not_found
-      | (name', _, _, proc) :: rs ->
-        if name' = name then proc else find_rule rs
+      | (name', _, group, proc) :: rs ->
+        if name' = name then group, proc else find_rule rs
     in
     match find_rule rules with
-    | proc ->
-      action "Rule" "%s" name ;
+    | group, proc ->
+      if is_scary group then
+        scary "Rule" "%s" name
+      else 
+        action "Rule" "%s" name ;
       proc config
     | exception Not_found ->
       error @@ sprintf "No such rule: %s" name
 
-(** [rule_all config] executes every rule except for those in the Destroy and
-    Splice groups. *)
+(** [rule_all config] executes every rule except for those in [scary_groups]. *)
 let rule_all config =
   List.iter
     (fun (name, _, group, _) ->
-       if group = Destroy || group = Splice then ()
+       if is_scary group then ()
        else begin
          rule config name ;
          print_endline ""
