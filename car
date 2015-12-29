@@ -506,7 +506,7 @@ let () =
     let config = load_config () in
     chdir src_dir ;
     if argc = 1 then rule_all config
-    else Array.iter (rule config) Sys.argv
+    else Array.iter (rule config) (Array.sub Sys.argv 1 (argc - 1))
   end
 
 (* vim: set filetype=ocaml : *)
