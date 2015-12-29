@@ -42,3 +42,5 @@ In `src/project_top.ml` (replace `project` with the name of your project):
     let () = UTop_main.main ()
 
 This file is ignored when building your project as a library.
+
+This example code is also contained in the `.ocamlinit` and `project_top.ml` files in this repository.
