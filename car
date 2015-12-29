@@ -1,43 +1,84 @@
 #!/usr/bin/env utop
 #require "unix"
+#require "toml"
+#require "ansiterminal"
 
-(* mk: a fanny pack for OCaml projects.
-   Disorganized and unstlyish, but handy.
+(* car: A collection of aliases for common tasks on OCaml projects using ocamlbuild.
+   (cons was taken!)
 
-   Provides shortcuts for common tasks involving OCaml projects, e.g.:
-   - installing a project as a library
-   - writing the same list of dependencies to .merlin, _tags, and META
-   - running _test.ml files
+   Packaged in one script for ease of distributing modified versions for
+   specific projects.
 
-   It's intended that you copy this script to your project's directory and
-   modify it however you see fit. It's called mk because it's easy to type
-   "./mk" with one hand.
-
-   You're expected to have a directory structure like this:
-
-       project/
-         mk
-         src/
-           main.ml
-           some_module.ml
-           some_module_test.ml
-           ...
+   Requires:
+    - toml
+    - ansiterminal
 
    Licensed under the BSD 2-Clause License.
    Copyright 2015 Jonathan Y. Chan <jyc@fastmail.fm>
-   https://github.com/jonathanyc/mk *)
-
-let src_dir = "src"
-let project = "my_project"
-let package = "my-project"
-
-let dependencies =
-  ["pcre"; "lwt"; "lwt.unix"; "yojson"]
+   https://github.com/jonathanyc/car *)
 
 open Unix
 open Printf
 (* Make sure we are using Pervasive's stderr, etc. *)
 open Pervasives
+
+(* Constants. *)
+let src_dir = "src"
+let config_path = "car.toml"
+
+(** [config] represents the configuration for a project using car, stored in
+    TOML file at [config_path].
+    Note: if this format changes, make sure to modify [init] accordingly! *)
+type config = {
+  project : string;
+  package : string;
+  requires : string list;
+}
+
+let (&) f g x = f (g x)
+
+(** [error s] prints [s] colored red to stderr before exiting the program. *)
+let error s =
+  ANSITerminal.(prerr_string [red] s) ;
+  prerr_endline "" ;
+  exit 1
+
+(** [action verb format args*] prints [verb] colored green followed by [printf
+    format args*]. It is used to display big actions. *)
+let action verb =
+  ksprintf
+    (fun s ->
+       ANSITerminal.(print_string [green] verb) ;
+       print_endline (" " ^ s) ;
+       flush stdout)
+
+(** [note verb format args*] prints [verb] colored blue followed by [printf
+    format args*]. It is used to display notes about smaller actions. *)
+let note verb =
+  ksprintf
+    (fun s ->
+       ANSITerminal.(print_string [blue] verb) ;
+       print_endline (" " ^ s) ;
+       flush stdout)
+
+(** [load_config ()] tries to load a [config] from a TOML file at
+    [config_path]. If it fails it errors and exits the program. *)
+let load_config () =
+  let table = Toml.Parser.from_filename config_path in
+  let load_named f name table =
+    match f name table with
+    | x -> x
+    | exception Not_found ->
+      failwith (Printf.sprintf "Couldn't find '%s'." name)
+  in
+  let load_string = load_named (Toml.get_string & Toml.key) in
+  let load_strings = load_named (Toml.get_string_array & Toml.key) in
+  try
+    { project = table |> load_string "project";
+      package = table |> load_string "package";
+      requires = table |> load_strings "requires" }
+  with e ->
+    error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
 (** If [log_commands] is true, we print out the commands we are exiting through
     [run] and [run_status] before executing them.
@@ -58,16 +99,14 @@ let with_log_commands x f =
     due to a signal, we print an error is printed to stderr and [exit 1]. *)
 let run cmd =
   if !log_commands then
-    print_endline cmd 
+    print_endline cmd
   else () ;
   match system cmd with
   | WEXITED 0 -> ()
   | WEXITED x ->
-    fprintf stderr "\nCommand failed: '%s' exited with code %d.\n" cmd x ;
-    exit 1
+    error @@ sprintf "\nCommand failed: '%s' exited with code %d." cmd x
   | _ ->
-    fprintf stderr "\nCommand failed: '%s' exited abnormally.\n" cmd ;
-    exit 1
+    error @@ sprintf "\nCommand failed: '%s' exited abnormally." cmd
 
 (** [run_status cmd] is ike [run cmd] except it returns the exit code of the
     command. Unlike [run cmd] it only prints an error and exits when the
@@ -79,8 +118,7 @@ let run_status cmd =
   match system cmd with
   | WEXITED code -> code
   | _ ->
-    fprintf stderr "\nCommand failed: '%s' exited abnormally.\n" cmd ;
-    exit 1
+    error @@ sprintf "\nCommand failed: '%s' exited abnormally." cmd
 
 (** [has_package name] returns true if the package [name] is known to
     ocamlfind. *)
@@ -93,9 +131,9 @@ let has_package name =
     -use-ocamlfind flag which we need for pretty much everything. *)
 let ocb ?(quiet=false) cmd =
   if quiet then
-    run ("ocamlbuild -quiet -use-ocamlfind " ^ cmd) 
+    run ("ocamlbuild -quiet -use-ocamlfind " ^ cmd)
   else
-    run ("ocamlbuild -use-ocamlfind " ^ cmd) 
+    run ("ocamlbuild -use-ocamlfind " ^ cmd)
 
 (** [mcase s] returns the string [s] with its first character uppercased (i.e.
     how OCaml gets module names from file names. *)
@@ -118,6 +156,11 @@ let install path =
   run ("rm -rf ../" ^ path) ;
   run (sprintf "mv %s ../%s" path path)
 
+let write_to_file path s =
+  let och = open_out path in
+  output_string och s ;
+  close_out och
+
 (** [modules ()] returns a list of the OCaml modules in the current directory.
     It does this by finding all the .ml files and calling [mcase] on the
     filenames. *)
@@ -136,14 +179,12 @@ let modules () =
 let write_module_list ?(excludes=[]) ~dest =
   let mods = modules () in
   let out = Buffer.create 128 in
-  let och = open_out dest in
   List.iter
-    (fun m -> 
+    (fun m ->
        if List.mem m excludes || Filename.check_suffix m "_test" then ()
        else Buffer.add_string out (m ^ "\n"))
     mods ;
-  output_string och (Buffer.contents out) ;
-  close_out och
+  write_to_file dest (Buffer.contents out)
 
 (** [with_module_list ?excludes dest f] calls [write_module_list ?excludes
     ~dest], then [f ()], then removes the created module list afterwards. So
@@ -158,7 +199,7 @@ let with_module_list ?excludes ~dest f =
     one already exist that doesn't contain a splice section tagged [tag] then
     [s] is spliced at the end of the file. Otherwise the existing splice
     section is replaced with [s]. A splice section looks like:
-    
+
         #begin mk TAG
         S
         #end
@@ -172,7 +213,7 @@ let splice_file path tag s =
 
   let out = Buffer.create 128 in
   let spliced = ref false in
-  let splice () = 
+  let splice () =
     assert (not !spliced) ;
     Buffer.add_string out (sprintf "%s\n%s\n%s\n" start_line s end_line) ;
     spliced := true ;
@@ -190,19 +231,19 @@ let splice_file path tag s =
         splice () ;
         (* Keep reading until we get to the [end_line]. *)
         let skipping = ref true in
-        while !skipping do 
+        while !skipping do
           match input_line inch with
           | s when s = end_line -> skipping := false
           | _ -> ()
           | exception End_of_file -> skipping := false
         done
-      | line -> 
+      | line ->
         Buffer.add_string out line ;
         Buffer.add_char out '\n'
       | exception End_of_file ->
         if not !spliced then begin
           Buffer.add_char out '\n' ;
-          splice () 
+          splice ()
         end ;
         splicing := false
     done ;
@@ -210,9 +251,7 @@ let splice_file path tag s =
     close_in inch ;
   end ;
 
-  let ouch = open_out path in
-  output_string ouch (Buffer.contents out) ;
-  close_out ouch
+  write_to_file path (Buffer.contents out)
 
 (* A list of file extensions of artifacts to install with ocamlfind. *)
 let desired_artifacts =
@@ -231,24 +270,25 @@ type rule_group =
     doesn't run "destructive" rules like clean and unlib (otherwise it'd delete
     the files it just created!) *)
 let rules =
-  [(* splice autogenerates:
+  [(* deps autogenerates:
       - requires and archive directives in META
       - PKG directives in .merlin
       - package flags in _tags
-      ... based on the dependencies listed in [dependencies].
+      ... based on the dependencies listed in [requires].
       It's pointlessly tedious to have to edit three files every time you add a
       new dependency. *)
-   ("splice",
+   ("deps",
+    "Generate dependency lists in META, .merlin, and _tags.",
     Generate,
-    (fun () ->
-       let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) dependencies) in
-       let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) dependencies) in
+    (fun { project; requires } ->
+       let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
+       let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) requires) in
        let meta =
          sprintf
            "requires = \"%s\"\n\
             archive(byte) = \"%s.cma\"\n\
             archive(native) = \"%s.cmxa\""
-           (String.concat " " dependencies) project project
+           (String.concat " " requires) project project
        in
        splice_file "META" "META" meta (* wow such meta *) ;
        splice_file "_tags" "_tags" tags (* very tags *) ;
@@ -258,8 +298,9 @@ let rules =
       the spliced files, beacuse it makes sense to commit those and because you
       might have your own changes. *)
    ("clean",
+    "Delete binaries created by other commands.",
     Destroy,
-    (fun () ->
+    (fun { project } ->
        ocb "-clean" ;
        chdir ".." ;
        run (sprintf "rm -f main.native main.d.byte %s.top %s.docdir" project project) ;
@@ -267,20 +308,23 @@ let rules =
 
    (* byte builds main.d.byte using ocamlbuild from a src/main.ml file. *)
    ("byte",
+    "Build main.d.byte from src/main.ml.",
     Build,
-    (fun () ->
+    (fun _ ->
        ocb "main.d.byte" ;
        install "main.d.byte"));
 
    (* opt builds main.native using ocamlbuild from a src/main.ml file. *)
    ("opt",
+    "Build main.native from main.ml.",
     Build,
-    (fun () ->
+    (fun _ ->
        ocb "main.native" ;
        install "main.native"));
 
    (* top builds a custom toplevel, [project].top containing all the modules in
       the project except for Main and *_test.
+
       You should add a file called [mcase project]_top.ml containing the
       following line:
 
@@ -290,14 +334,15 @@ let rules =
       dependencies). You should also create a file called .ocamlinit in the
       root of the project (if that's where you're going to be running the top)
       with the contents:
-   
+
           #thread
           #directory "src/_build"
-   
+
       ... to set up the top properly. *)
    ("top",
+    "Build a toplevel.",
     Build,
-    (fun () ->
+    (fun { project } ->
        with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
          (fun () ->
             ocb (sprintf "%s.top" project) ;
@@ -306,8 +351,9 @@ let rules =
    (* doc runs ocamldoc on all of the modules in your project except for *_test
       modules. The generated documentation is located at <project>.docdir. *)
    ("doc",
+    "Build project documentation.",
     Build,
-    (fun () ->
+    (fun { project } ->
        with_module_list ~dest:(sprintf "%s.odocl" project)
          (fun () ->
             ocb (sprintf "%s.docdir/index.html" project) ;
@@ -316,11 +362,12 @@ let rules =
    (* lib installs all of the modules in your project except for Main, *_test
       modules, and [mcase project]_top as an ocamlfind package named [package]. *)
    ("lib",
+    "Install project modules as an ocamlfind package.",
     Install,
-    (fun () ->
+    (fun { project; package } ->
        (* Remove this package if it's already installed. *)
        if has_package package then
-         run (sprintf "ocamlfind remove %s" package)
+         run (sprintf "ocamlfind remove %s >/dev/null" package)
        else () ;
 
        with_module_list
@@ -332,10 +379,10 @@ let rules =
             (* Native code. *)
             ocb (sprintf "%s.cmxa" project) ;
 
-            let artifacts = 
+            let artifacts =
               Sys.readdir "_build"
               |> Array.to_list
-              |> List.map (fun s -> "_build/" ^ s) 
+              |> List.map (fun s -> "_build/" ^ s)
               |> List.filter (fun s -> not (Sys.is_directory s))
               |> List.filter (fun s -> List.exists (fun f -> Filename.check_suffix s f) desired_artifacts)
               |> String.concat " "
@@ -345,15 +392,17 @@ let rules =
 
    (* unlib removes the package created by lib named [package]. *)
    ("unlib",
+    "Delete the ocamlfind package created by lib.",
     Destroy,
-    (fun () ->
+    (fun { package } ->
        run (sprintf "ocamlfind remove %s" package)));
 
    (* test finds all the files named *_test.ml, builds them to bytecode with
       debugging flags, then runs them with backtraces enabled. *)
    ("test",
+    "Run test files.",
     Test,
-    (fun () ->
+    (fun _ ->
        let test_files =
          Sys.readdir "."
          |> Array.to_list
@@ -364,45 +413,100 @@ let rules =
             List.iter
               (fun test ->
                  let out = "./" ^ Filename.chop_extension test ^ ".d.byte" in
-                 printf "Testing: %s\n%!" test ;
+                 note "Test" "%s" test ;
                  ocb ~quiet:true out ;
                  run ({|OCAMLRUNPARAM="b" |} ^ out) ;
                  run ("rm " ^ out))
               test_files)))]
 
-(** [rule name] runs the rule named [name] if it exists. If no such rule
-    exists, we print an error is printed then [exit 1]. *)
-let rule name =
-  let rec rule' = function
-    | [] -> raise Not_found
-    | (name', _, proc) :: rs ->
-      if name' = name then proc else rule' rs
-  in
-  match rule' rules with
-  | proc ->
-    printf "Rule: %s\n%!" name ;
-    proc ()
-  | exception Not_found ->
-    printf "No such rule: %s\n" name ;
-    exit 1
+(** [help ()] displays a help message then exits with code 1. *)
+let help () =
+  ANSITerminal.(print_string [blue] "Usage") ;
+  print_endline " car [rule]*" ;
+  print_endline "A collection of aliases for common tasks on OCaml projects using ocamlbuild." ;
+  print_endline "" ;
 
-(** [rule_all ()] executes every rule except for "clean" and "unlib". *)
-let rule_all () =
+  (* Find the maximum length of the name of a rule so we can pad the names in the listing. *)
+  let max_n = ref 0 in
   List.iter
-    (fun (name, group, _) ->
+    (fun (name, _, _, _) ->
+       let n = String.length name in
+       if n > !max_n then max_n := n)
+    rules ;
+
+  let show_rule name desc =
+       ANSITerminal.(print_string [green] name) ;
+       print_endline (String.make (!max_n - String.length name + 2) ' ' ^ desc)
+  in
+
+  show_rule "init" @@ sprintf "Create an initial %s file." config_path ;
+
+  (* Print a listing of all the rules and their descriptions. *)
+  List.iter (fun (name, desc, _, _) -> show_rule name desc) rules ;
+  print_endline "" ;
+  print_endline "If you don't supply a rule, all rules will run but clean and unlib." ;
+  exit 1
+
+(** [init ()] tries to initialize a config file at [config_path]. *)
+let init () =
+  if Sys.file_exists config_path then
+    error @@ sprintf "A %s file already exists. Delete it if you want to make a new one." config_path
+  else begin
+    let package = Filename.basename @@ Sys.getcwd () in
+    write_to_file config_path @@
+    sprintf
+      "project = \"%s\"\n\
+       package = \"%s\"\n\
+       requires = []"
+      Str.(global_replace (regexp "-") "_" package)
+      package ;
+    run @@ sprintf "$EDITOR %s" config_path
+  end
+
+(** [rule config name] runs the rule named [name] if it exists. If no such rule
+    exists, we print an error is printed then [exit 1]. *)
+let rule config name =
+  if Filename.check_suffix name "help" then help ()
+  else
+    let rec find_rule = function
+      | [] -> raise Not_found
+      | (name', _, _, proc) :: rs ->
+        if name' = name then proc else find_rule rs
+    in
+    match find_rule rules with
+    | proc ->
+      action "Rule" "%s" name ;
+      proc config
+    | exception Not_found ->
+      error @@ sprintf "No such rule: %s" name
+
+(** [rule_all config] executes every rule except for "clean" and "unlib". *)
+let rule_all config =
+  List.iter
+    (fun (name, _, group, _) ->
        if group = Destroy then ()
        else begin
-         rule name ;
+         rule config name ;
          print_endline ""
        end)
     rules
 
 (* Here we go! *)
-let () = 
-  chdir src_dir ;
-  if Array.length Sys.argv = 1 then
-    rule_all ()
-  else
-    rule Sys.argv.(1)
+let () =
+  let asking_for_help =
+    List.exists
+      (fun s -> Filename.check_suffix s "help")
+      (Array.to_list Sys.argv)
+  in
+  let argc = Array.length Sys.argv in
+
+  if asking_for_help then help ()
+  else if argc = 2 && Sys.argv.(1) = "init" then init ()
+  else begin
+    let config = load_config () in
+    chdir src_dir ;
+    if argc = 1 then rule_all config
+    else Array.iter (rule config) Sys.argv
+  end
 
 (* vim: set filetype=ocaml : *)
