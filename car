@@ -280,15 +280,15 @@ type rule_group =
     doesn't run "destructive" rules like clean and unlib (otherwise it'd delete
     the files it just created!) *)
 let rules =
-  [(* deps autogenerates:
+  [(* gen autogenerates:
       - requires and archive directives in META
       - PKG directives in .merlin
       - package flags in _tags
       ... based on the dependencies listed in [requires].
       It's pointlessly tedious to have to edit three files every time you add a
       new dependency. *)
-   ("deps",
-    "Generate dependency lists in META, .merlin, and _tags.",
+   ("gen",
+    "Generate a META file and dependency lists in .merlin, and _tags.",
     Generate,
     (fun { project; requires } ->
        let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
