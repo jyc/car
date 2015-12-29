@@ -29,8 +29,11 @@ To create an initial `car.toml` file you can run `./car init`.
 You can also install `car` to somewhere on `$PATH` and do `car` instead of
 `./car`, although then you won't be able to make customizations per-project.
 
-If you want to build a toplevel, you can add the following files to enhance the
-experience, paths relative to the root of your project.
+## Building a toplevel
+
+If you want to build a toplevel using `car top`, running `car topgen` will
+splice support code in the following files (paths relative to the root of the
+project): 
 
 In `.ocamlinit`:
 
@@ -41,6 +44,8 @@ In `src/project_top.ml` (replace `project` with the name of your project):
 
     let () = UTop_main.main ()
 
-This file is ignored when building your project as a library.
+`project_top.ml` file is ignored when building your project as a library.
 
-This example code is also contained in the `.ocamlinit` and `project_top.ml` files in this repository.
+After running `car topgen`, you can run `car top` to build your own custom
+toplevel. You can run it with `./project.top` (where `project` is your
+project's name).
