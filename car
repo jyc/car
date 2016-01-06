@@ -1,7 +1,7 @@
 #!/usr/bin/env utop
 #require "unix"
 #require "toml"
-#require "ansiterminal"
+#require "ANSITerminal"
 
 (* car: A collection of aliases for common tasks on OCaml projects using ocamlbuild.
    (cons was taken!)
