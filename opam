@@ -1,0 +1,15 @@
+opam-version: "1.2"
+name: "car"
+version: "1.0.0"
+maintainer: "Jonathan Chan <jyc@fastmail.fm>"
+authors: "Jonathan Chan <jyc@fastmail.fm>"
+homepage: "https://github.com/jonathanyc/car"
+bug-reports: "https://github.com/jonathanyc/car/issues"
+license: "BSD 2-Clause"
+dev-repo: "git@github.com:jonathanyc/car.git"
+build: []
+depends: [
+  "ocamlfind" {build}
+  "ANSITerminal" {>= "0.6.5"}
+  "toml" {>= "4.0.0" & < "5.0.0"}
+]
