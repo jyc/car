@@ -8,11 +8,17 @@ Provides shortcuts for common tasks involving OCaml projects, e.g.:
 - writing the same list of dependencies to .merlin, _tags, and META
 - running _test.ml files
 
-It's intended that you copy this script to your project's directory and
-modify it however you see fit. It's called mk because it's easy to type
-"./mk" with one hand.
+# Installing
 
-**I will add more documentation soon!**
+You can install using OPAM:
+
+    opam pin add .
+
+This will ensure you have all the required dependencies.
+
+Alternatively you can just copy or link `car` to somewhere on your `$PATH`.
+
+# Usage
 
 You're expected to have a directory structure like this:
 
@@ -29,7 +35,7 @@ To create an initial `car.toml` file you can run `./car init`.
 You can also install `car` to somewhere on `$PATH` and do `car` instead of
 `./car`, although then you won't be able to make customizations per-project.
 
-## Building a toplevel
+# Building a toplevel
 
 If you want to build a toplevel using `car top`, running `car topgen` will
 splice support code in the following files (paths relative to the root of the
