@@ -97,18 +97,24 @@ let note verb =
     [config_path]. If it fails it errors and exits the program. *)
 let load_config () =
   let data : TomlTypes.table = Toml.Parser.(unsafe @@ from_filename config_path) in
-  let must name = function
+  let required (name, x) =
+    match x with
     | None -> failwith @@ sprintf "Couldn't find '%s'." name
-    | Some x -> x
+    | Some y -> y
   in
-  let load f name = must name TomlLenses.(get data (key name |-- f)) in
+  let optional ~default (name, x) =
+    match x with
+    | None -> default
+    | Some y -> y
+  in
+  let load f name = name, TomlLenses.(get data (key name |-- f)) in
   let load_string = load TomlLenses.string in
   let load_strings = load TomlLenses.(array |-- strings) in
   try
-    { project = load_string "project";
-      package = load_string "package";
-      requires = load_strings "requires";
-      flags = load_strings "flags" }
+    { project = required @@ load_string "project";
+      package = required @@ load_string "package";
+      requires = required @@ load_strings "requires";
+      flags = optional ~default:[] @@ load_strings "flags" }
   with e ->
     error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
