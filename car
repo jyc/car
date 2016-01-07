@@ -47,6 +47,7 @@ type config = {
   project : string;
   package : string;
   requires : string list;
+  flags : string list;
 }
 
 let (&) f g x = f (g x)
@@ -107,7 +108,8 @@ let load_config () =
   try
     { project = table |> load_string "project";
       package = table |> load_string "package";
-      requires = table |> load_strings "requires" }
+      requires = table |> load_strings "requires";
+      flags = table |> load_strings "flags" }
   with e ->
     error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
@@ -135,9 +137,9 @@ let run cmd =
   match system cmd with
   | WEXITED 0 -> ()
   | WEXITED x ->
-    error @@ sprintf "\nCommand failed: '%s' exited with code %d." cmd x
+    error @@ sprintf "Command failed: '%s' exited with code %d." cmd x
   | _ ->
-    error @@ sprintf "\nCommand failed: '%s' exited abnormally." cmd
+    error @@ sprintf "Command failed: '%s' exited abnormally." cmd
 
 (** [run_status cmd] is ike [run cmd] except it returns the exit code of the
     command. Unlike [run cmd] it only prints an error and exits when the
@@ -149,22 +151,24 @@ let run_status cmd =
   match system cmd with
   | WEXITED code -> code
   | _ ->
-    error @@ sprintf "\nCommand failed: '%s' exited abnormally." cmd
+    error @@ sprintf "Command failed: '%s' exited abnormally." cmd
 
 (** [has_package name] returns [true] if the package [name] is known to
     ocamlfind. *)
 let has_package name =
   run_status (sprintf "ocamlfind query %s >/dev/null 2>&1" name) = 0
 
-(** [ocb ?quiet cmd] runs the ocamlfind command [cmd]. If [quiet] is [true] the
-    -quiet flag is given to ocamlbuild, which causes normal output to be
-    suppressed (only errors are output). The main point is that it includes the
-    -use-ocamlfind flag which we need for pretty much everything. *)
-let ocb ?(quiet=false) cmd =
+(** [ocb ?flags ?quiet cmd] runs the ocamlfind command [cmd]. If [quiet] is
+    [true] the -quiet flag is given to ocamlbuild, which causes normal output
+    to be suppressed (only errors are output). The main point is that it
+    includes the -use-ocamlfind flag which we need for pretty much everything.
+    Flags is optionally a list of additional arguments. *)
+let ocb ?(flags=[]) ?(quiet=false) cmd =
+  let args = if flags = [] then "" else " " ^ String.concat " " flags in
   if quiet then
-    run ("ocamlbuild -quiet -use-ocamlfind " ^ cmd)
+    run @@ sprintf "ocamlbuild -quiet -use-ocamlfind%s %s" args cmd
   else
-    run ("ocamlbuild -use-ocamlfind " ^ cmd)
+    run @@ sprintf "ocamlbuild -use-ocamlfind%s %s" args cmd
 
 (** [mcase s] returns the string [s] with its first character uppercased (i.e.
     how OCaml gets module names from file names. *)
@@ -313,25 +317,25 @@ let rules =
    ("gen",
     "Generate a META file and dependency lists in .merlin, and _tags.",
     Splice,
-    (fun { project; requires } ->
-       let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
-       let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) requires) in
-       let meta =
-         sprintf
-           "requires = \"%s\"\n\
-            archive(byte) = \"%s.cma\"\n\
-            archive(native) = \"%s.cmxa\""
-           (String.concat " " requires) project project
-       in
-       splice_file "META" "META" meta (* wow such meta *) ;
-       splice_file "_tags" "_tags" tags (* very tags *) ;
-       splice_file ".merlin" ".merlin" merlin));
+    fun { project; requires } ->
+      let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
+      let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) requires) in
+      let meta =
+        sprintf
+          "requires = \"%s\"\n\
+           archive(byte) = \"%s.cma\"\n\
+           archive(native) = \"%s.cmxa\""
+          (String.concat " " requires) project project
+      in
+      splice_file "META" "META" meta (* wow such meta *) ;
+      splice_file "_tags" "_tags" tags (* very tags *) ;
+      splice_file ".merlin" ".merlin" merlin);
 
    ("reqs",
     "Print a list of the required packages listed in the config.",
     Print,
-    (fun { requires } ->
-       List.iter print_endline requires ));
+    fun { requires } ->
+      List.iter print_endline requires);
 
    (* clean deletes the binaries created by other commands. It doesn't delete
       the spliced files, beacuse it makes sense to commit those and because you
@@ -339,27 +343,27 @@ let rules =
    ("clean",
     "Delete binaries created by other commands.",
     Destroy,
-    (fun { project } ->
-       ocb "-clean" ;
-       chdir ".." ;
-       run (sprintf "rm -f main.native main.d.byte %s.top %s.docdir" project project) ;
-       chdir src_dir));
+    fun { project; flags } ->
+      ocb ~flags "-clean" ;
+      chdir ".." ;
+      run (sprintf "rm -f main.native main.d.byte %s.top %s.docdir" project project) ;
+      chdir src_dir);
 
    (* byte builds main.d.byte using ocamlbuild from a src/main.ml file. *)
    ("byte",
     "Build main.d.byte from src/main.ml.",
     Build,
-    (fun _ ->
-       ocb "main.d.byte" ;
-       install "main.d.byte"));
+    fun { flags } ->
+      ocb ~flags "main.d.byte" ;
+      install "main.d.byte");
 
    (* opt builds main.native using ocamlbuild from a src/main.ml file. *)
    ("opt",
     "Build main.native from main.ml.",
     Build,
-    (fun _ ->
-       ocb "main.native" ;
-       install "main.native"));
+    fun { flags } ->
+      ocb ~flags "main.native" ;
+      install "main.native");
 
    (* top builds a custom toplevel, [project].top containing all the modules in
       the project except for Main and *_test.
@@ -382,28 +386,37 @@ let rules =
    ("top",
     "Build a toplevel.",
     Build,
-    (fun { project } ->
-       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
-         (fun () ->
-            ocb (sprintf "%s.top" project) ;
-            install (sprintf "%s.top" project)))) ;
+    fun { project; flags } ->
+      with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
+        (fun () ->
+           ocb ~flags @@ sprintf "%s.top" project ;
+           install (sprintf "%s.top" project))) ;
 
    ("topgen",
     "Splice support code for a toplevel in .ocamlinit and _top.ml.",
     Splice,
-    (fun { project } ->
-       splice_file ~ml:true "../.ocamlinit" "topgen" "#thread\n#directory \"src/_build\"" ;
-       splice_file ~ml:true (project ^ "_top.ml") "topgen" "let () = UTop_main.main ()")) ;
+    fun { project; requires } ->
+      let topfile = project ^ "_top.ml" in  
+      splice_file ~ml:true "../.ocamlinit" "topgen" "#thread\n#directory \"src/_build\"" ;
+      splice_file ~ml:true topfile "topgen" "let () = UTop_main.main ()" ;
+      if not (List.mem "utop" requires) then begin
+        note "topgen" "I noticed that 'utop' isn't contained in 'requies' in car.toml." ;
+        note "topgen" "You add it now if want to use the generated %s," topfile ;
+        note "topgen" "or delete it if you don't want to use UTop." ;
+        note "topgen" "UTop also expects threads to be enabled." ;
+        note "topgen" "If you haven't already, you can add the line 'true: thread' to _tags." ;
+      end
+   ) ;
 
    (* doc runs ocamldoc on all of the modules in your project except for *_test
       modules. The generated documentation is located at <project>.docdir. *)
    ("doc",
     "Build project documentation.",
     Build,
-    (fun { project } ->
+    (fun { project; flags } ->
        with_module_list ~dest:(sprintf "%s.odocl" project)
          (fun () ->
-            ocb (sprintf "%s.docdir/index.html" project) ;
+            ocb ~flags @@ sprintf "%s.docdir/index.html" project ;
             install (sprintf "%s.docdir" project))));
 
    (* lib installs all of the modules in your project except for Main, *_test
@@ -411,7 +424,7 @@ let rules =
    ("lib",
     "Install project modules as an ocamlfind package.",
     Install,
-    (fun { project; package } ->
+    (fun { project; package; flags } ->
        (* Remove this package if it's already installed. *)
        if has_package package then
          run (sprintf "ocamlfind remove %s >/dev/null" package)
@@ -422,9 +435,9 @@ let rules =
          ~dest:(sprintf "%s.mllib" project)
          (fun () ->
             (* Bytecode. *)
-            ocb (sprintf "%s.cma" project) ;
+            ocb ~flags @@ sprintf "%s.cma" project ;
             (* Native code. *)
-            ocb (sprintf "%s.cmxa" project) ;
+            ocb ~flags @@ sprintf "%s.cmxa" project ;
 
             let artifacts =
               Sys.readdir "_build"
@@ -449,7 +462,7 @@ let rules =
    ("test",
     "Run test files.",
     Test,
-    (fun _ ->
+    (fun { flags } ->
        let test_files =
          Sys.readdir "."
          |> Array.to_list
@@ -461,7 +474,7 @@ let rules =
               (fun test ->
                  let out = "./" ^ Filename.chop_extension test ^ ".d.byte" in
                  note "Test" "%s" test ;
-                 ocb ~quiet:true out ;
+                 ocb ~flags ~quiet:true out ;
                  run ({|OCAMLRUNPARAM="b" |} ^ out) ;
                  run ("rm " ^ out))
               test_files)))]
@@ -510,9 +523,14 @@ let init () =
     let package = Filename.basename @@ Sys.getcwd () in
     write_to_file config_path @@
     sprintf
-      "project = \"%s\"\n\
+      "# The project name. Used to name library files, the top binary, and the docdir.\n\
+       project = \"%s\"\n\
+       # The ocamlfind package name.\n\
        package = \"%s\"\n\
-       requires = []"
+       # A list of ocamlfind packages required by this project.\n\
+       requires = []
+       # A list of additional flags to pass to ocamlbuild.\n\
+       flags = []\n"
       Str.(global_replace (regexp "-") "_" package)
       package ;
     run @@ sprintf "$EDITOR %s" config_path
