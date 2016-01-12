@@ -321,7 +321,7 @@ let desired_artifacts =
 let rules =
   [(* gen autogenerates:
       - requires and archive directives in META
-      - PKG directives in .merlin
+      - S, B, and PKG directives in .merlin
       - package flags in _tags
       ... based on the dependencies listed in [requires].
       It's pointlessly tedious to have to edit three files every time you add a
@@ -330,7 +330,10 @@ let rules =
     "Generate a META file and dependency lists in .merlin, and _tags.",
     Splice,
     fun { project; requires } ->
-      let merlin = String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires) in
+      let merlin =
+        "S .\nB _build\n" ^ 
+        String.concat "\n" (List.map (fun s -> sprintf "PKG %s" s) requires)
+      in
       let tags = "true: " ^ String.concat ", " (List.map (fun s -> sprintf "package(%s)" s) requires) in
       let meta =
         sprintf
