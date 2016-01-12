@@ -1,5 +1,6 @@
 #!/usr/bin/env utop
 #require "unix"
+#require "str"
 #require "toml"
 #require "ANSITerminal"
 
@@ -29,6 +30,7 @@ let config_path = "car.toml"
 type rule_group =
   | Build
   | Test
+  | Run
 
   | Destroy
   | Splice
@@ -38,19 +40,23 @@ type rule_group =
 
 (** [scary_groups] is a list of rule groups that shouldn't be run without being
     explicitly specified, e.g. clean, lib. [rule_all] does not run them. *)
-let scary_groups = [Destroy; Splice; Install; Print]
+let scary_groups = [Destroy; Splice; Install; Print; Run]
 
 (** [config] represents the configuration for a project using car, stored in
-    TOML file at [config_path].
+    TOML file at [config_path] (except for [args], which comes from the
+    command-line arguments.).
+
     Note: if this format changes, make sure to modify [init] accordingly! *)
 type config = {
   project : string;
   package : string;
   requires : string list;
   flags : string list;
+
+  args : string list;
 }
 
-let (&) f g x = f (g x)
+let (@.) f g x = f (g x)
 
 (** [is_scary group] returns [true] if a group is scary.
     @see [scary_groups] *)
@@ -114,7 +120,8 @@ let load_config () =
     { project = required @@ load_string "project";
       package = required @@ load_string "package";
       requires = required @@ load_strings "requires";
-      flags = optional ~default:[] @@ load_strings "flags" }
+      flags = optional ~default:[] @@ load_strings "flags";
+      args = [] }
   with e ->
     error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
@@ -482,7 +489,32 @@ let rules =
                  ocb ~flags ~quiet:true out ;
                  run ({|OCAMLRUNPARAM="b" |} ^ out) ;
                  run ("rm " ^ out))
-              test_files)))]
+              test_files)));
+
+   ("run",
+    "Run main or a specified file.",
+    Run,
+    (fun { flags; args } ->
+       let target =
+         match args with
+         | [] -> Some "main.ml"
+         | [s] -> Some (s ^ ".ml")
+         | _ -> None
+       in
+       match target with
+       | None ->
+         error "Expected run:[name]."
+       | Some s ->
+         if not (Sys.file_exists s) then
+           error @@ sprintf "Couldn't find a file named %s.ml." s
+         else
+           let out = "./" ^ Filename.chop_extension s ^ ".d.byte" in
+           with_log_commands false
+             (fun () ->
+                ocb ~flags ~quiet:true out ;
+                run @@ {|OCAMLRUNPARAM="b" |} ^ out ;
+                run @@ "rm " ^ out)));
+  ]
 
 (** [help ()] displays a help message then exits with code 1. *)
 let help () =
@@ -572,6 +604,12 @@ let rule_all config =
        end)
     rules
 
+let parse_arg s =
+  match Str.(split (regexp ":") s) with
+  | [rule; args] -> Some (rule, Str.(split (regexp ",") args))
+  | [rule] -> Some (rule, [])
+  | _ -> None
+
 (* Here we go! *)
 let () =
   let asking_for_help =
@@ -587,7 +625,19 @@ let () =
     let config = load_config () in
     chdir src_dir ;
     if argc = 1 then rule_all config
-    else Array.iter (rule config) (Array.sub Sys.argv 1 (argc - 1))
+    else begin
+      let commands =
+        (Array.sub Sys.argv 1 (argc - 1))
+        |> Array.to_list
+        |> List.map parse_arg
+      in
+      if List.exists (function None -> true | _ -> false) commands then
+        help ()
+      else
+        commands
+        |> List.map (function Some x -> x | None -> assert false)
+        |> List.iter (fun (name, args) -> rule { config with args } name)
+    end
   end
 
 (* vim: set filetype=ocaml : *)
