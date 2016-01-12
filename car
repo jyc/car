@@ -533,7 +533,7 @@ let init () =
        # The ocamlfind package name.\n\
        package = \"%s\"\n\
        # A list of ocamlfind packages required by this project.\n\
-       requires = []
+       requires = []\n\
        # A list of additional flags to pass to ocamlbuild.\n\
        flags = []\n"
       Str.(global_replace (regexp "-") "_" package)
