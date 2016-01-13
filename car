@@ -1,18 +1,12 @@
 #!/usr/bin/env utop
 #require "unix"
 #require "str"
-#require "toml"
-#require "ANSITerminal"
 
 (* car: A collection of aliases for common tasks on OCaml projects using ocamlbuild.
    (cons was taken!)
 
    Packaged in one script for ease of distributing modified versions for
    specific projects.
-
-   Requires:
-    - toml
-    - ANSITerminal
 
    Licensed under the BSD 2-Clause License.
    Copyright 2015 Jonathan Y. Chan <jyc@fastmail.fm>
@@ -25,7 +19,7 @@ open Pervasives
 
 (* Constants. *)
 let src_dir = "src"
-let config_path = "car.toml"
+let config_path = "_car"
 
 type rule_group =
   | Build
@@ -64,7 +58,7 @@ let is_scary group = List.mem group scary_groups
 
 (** [error s] prints [s] colored red to stderr before exiting the program. *)
 let error s =
-  ANSITerminal.(prerr_string [red] s) ;
+  fprintf stderr "\x1b[31m%s\x1b[0m" s ;
   prerr_endline "" ;
   exit 1
 
@@ -76,7 +70,7 @@ let error s =
 let action verb =
   ksprintf
     (fun s ->
-       ANSITerminal.(print_string [green] verb) ;
+       printf "\x1b[32m%s\x1b[0m" verb ;
        print_endline (" " ^ s) ;
        flush stdout)
 
@@ -86,7 +80,7 @@ let action verb =
 let scary verb = 
   ksprintf
     (fun s ->
-       ANSITerminal.(print_string [yellow] verb) ;
+       printf "\x1b[33m%s\x1b[0m" verb ;
        print_endline (" " ^ s) ;
        flush stdout)
 
@@ -95,35 +89,174 @@ let scary verb =
 let note verb =
   ksprintf
     (fun s ->
-       ANSITerminal.(print_string [blue] verb) ;
+       printf "\x1b[34m%s\x1b[0m" verb ;
        print_endline (" " ^ s) ;
        flush stdout)
 
-(** [load_config ()] tries to load a [config] from a TOML file at
+(* Config parsing. *)
+
+type carn = [
+    `String of string
+  | `List of carn list
+]
+
+let read_chars path = 
+  let inch = open_in path in
+  let rec loop chars =
+    match input_char inch with
+    | c -> loop (c :: chars)
+    | exception End_of_file -> List.rev chars
+  in
+  let res = loop [] in
+  close_in inch ;
+  res
+
+(* project = "indoor-wiki"
+   ^ start
+            ^ end
+   Spaces ignored.
+*)
+let parse_key chars =
+  let buf = Buffer.create 0 in
+  let rec loop = function
+    | ('a'..'z' | 'A'..'Z' as c) :: cs ->
+      Buffer.add_char buf c ;
+      loop cs
+    | ' ' :: cs -> loop cs
+    | '=' :: cs ->
+      if Buffer.length buf = 0 then `Fail (0, "Empty key.")
+      else `Ok (0, `Key (Buffer.contents buf), cs)
+    | [] -> `Fail (0, "Unexpected EOF.")
+    | c :: _ -> `Fail (0, sprintf "Invalid character in key: %C." c)
+  in loop chars
+
+(* project = "indoor-wiki"
+              ^ start
+                          ^ end
+*)
+let parse_string chars =
+  let buf = Buffer.create 0 in
+  let rec loop i esc = function
+    | '\n' :: cs ->
+      if not esc then Buffer.add_char buf '\n' ;
+      loop (i + 1) false cs
+    | c :: cs when esc ->
+      Buffer.add_char buf c ;
+      loop i false cs
+    | '\\' :: cs -> loop i true cs
+    | '"' :: cs -> `Ok (i, `String (Buffer.contents buf), cs)
+    | c :: cs ->
+      Buffer.add_char buf c ;
+      loop i false cs
+    | [] -> `Fail (i, "Unexpected EOF.")
+  in loop 0 false chars
+
+(* requires = [
+               ^
+       ...
+   ]
+    ^
+*)
+let rec parse_list chars =
+  let rec loop i entries = function
+    | ' ' :: cs -> loop i entries cs
+    | '\n' :: cs -> loop (i + 1) entries cs
+    | ']' :: cs -> `Ok (i, `List entries, cs)
+    | _ :: _ as cs ->
+      begin match parse_value cs with
+        | `Fail (j, s) -> `Fail (i + j, s)
+        | `Ok (j, x, cs) ->
+          begin match cs with
+            | (',' :: cs) | (_ :: _ as cs) ->
+              loop (i + j) (x :: entries) cs
+            | [] -> `Fail (i + j, "Unexpected EOF.")
+          end
+      end
+    | [] -> `Fail (i, "Unexpected EOF.")
+  in loop 0 [] chars
+
+(* project = "indoor-wiki"
+            ^ start       ^ end
+   Spaces ignored.
+*)
+and parse_value = function
+  | ' ' :: cs -> parse_value cs
+  | '"' :: cs -> parse_string cs
+  | '[' :: cs -> parse_list cs
+  | c :: _ -> `Fail (0, sprintf "Unexpected value starting with %C." c)
+  | [] -> `Fail (0, "Unexpected EOF.")
+
+let parse_carfile path =
+  let chars = read_chars path in
+  let rec loop i kvs chars =
+    match chars with
+    | ('a'..'z' | 'A'..'Z') :: _ as cs ->
+      begin match parse_key cs with
+        | `Ok (j0, `Key s, cs) ->
+          begin match parse_value cs with
+            | `Ok (j1, v, cs) ->
+              loop (i + j0 + j1) ((s, v) :: kvs) cs
+            | `Fail (j1, s) -> `Error (sprintf "%s:%d: %s" path (i + j0 + j1) s)
+          end
+        | `Fail (j0, s) -> `Error (sprintf "%s:%d: %s" path (i + j0) s)
+      end
+    | '#' :: cs ->
+      let rec eat = function
+        | '\n' :: cs -> loop (i + 1) kvs cs
+        | _ :: cs -> eat cs
+        | [] -> `Ok (List.rev kvs)
+      in eat cs
+    | ' ' :: cs -> loop i kvs cs
+    | '\n' :: cs -> loop (i + 1) kvs cs
+    | c :: cs -> `Error (sprintf "%s:%d: Unexpected character %C." path i c)
+    | [] -> `Ok (List.rev kvs)
+  in loop 1 [] chars
+
+let carn_string carn key =
+  match List.assoc key carn with
+  | `String s -> Some s
+  | _ -> None
+  | exception Not_found -> None
+
+let carn_strings carn key =
+  match List.assoc key carn with
+  | `List xs ->
+    if List.exists (function `String _ -> false | _ -> true) xs then None
+    else Some (List.map (function `String s -> s | _ -> assert false) xs)
+  | _ -> None
+  | exception Not_found -> None
+
+(** [load_config ()] tries to load a [config] from a carfile at
     [config_path]. If it fails it errors and exits the program. *)
 let load_config () =
-  let data : TomlTypes.table = Toml.Parser.(unsafe @@ from_filename config_path) in
-  let required (name, x) =
-    match x with
-    | None -> failwith @@ sprintf "Couldn't find '%s'." name
-    | Some y -> y
-  in
-  let optional ~default (name, x) =
-    match x with
-    | None -> default
-    | Some y -> y
-  in
-  let load f name = name, TomlLenses.(get data (key name |-- f)) in
-  let load_string = load TomlLenses.string in
-  let load_strings = load TomlLenses.(array |-- strings) in
   try
+    if not (Sys.file_exists config_path) then
+      failwith @@ sprintf "No file found at %s." config_path ;
+    let data =
+      match parse_carfile config_path with
+      | `Ok x -> x
+      | `Error s -> failwith s
+    in
+    let required (name, x) =
+      match x with
+      | None -> failwith @@ sprintf "Couldn't find key '%s'." name
+      | Some y -> y
+    in
+    let optional ~default (name, x) =
+      match x with
+      | None -> default
+      | Some y -> y
+    in
+    let load f name = name, f data name in
+    let load_string = load carn_string in
+    let load_strings = load carn_strings in
     { project = required @@ load_string "project";
       package = required @@ load_string "package";
       requires = required @@ load_strings "requires";
       flags = optional ~default:[] @@ load_strings "flags";
       args = [] }
   with e ->
-    error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
+      error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
 (** If [log_commands] is [true], we print out the commands we are exiting
     through [run] and [run_status] before executing them. It can be toggled
@@ -415,7 +548,7 @@ let rules =
       splice_file ~ml:true "../.ocamlinit" "topgen" "#thread\n#directory \"src/_build\"" ;
       splice_file ~ml:true topfile "topgen" "let () = UTop_main.main ()" ;
       if not (List.mem "utop" requires) then begin
-        note "topgen" "I noticed that 'utop' isn't contained in 'requies' in car.toml." ;
+        note "topgen" "I noticed that 'utop' isn't contained in 'requies' in %s." config_path ;
         note "topgen" "You add it now if want to use the generated %s," topfile ;
         note "topgen" "or delete it if you don't want to use UTop." ;
         note "topgen" "UTop also expects threads to be enabled." ;
@@ -521,7 +654,7 @@ let rules =
 
 (** [help ()] displays a help message then exits with code 1. *)
 let help () =
-  ANSITerminal.(print_string [blue] "Usage") ;
+  printf "\x1b[34mUsage\x1b[0m" ;
   print_endline " car [rule]*" ;
   print_endline "A collection of aliases for common tasks on OCaml projects using ocamlbuild." ;
   print_endline "" ;
@@ -536,10 +669,10 @@ let help () =
 
   let show_rule name desc group =
     let color =
-      if is_scary group then ANSITerminal.yellow
-      else ANSITerminal.green
+      if is_scary group then "33" (* yellow *)
+      else "32" (* green *)
     in
-    ANSITerminal.(print_string [color] name) ;
+    printf "\x1b[%sm%s\x1b[0m" color name ;
     print_endline (String.make (!max_n - String.length name + 2) ' ' ^ desc)
   in
 
