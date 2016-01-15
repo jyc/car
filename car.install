@@ -1,3 +1,3 @@
 bin: [
-  "car"
+  "_build/car.native" {"car"}
 ]

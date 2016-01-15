@@ -7,7 +7,9 @@ homepage: "https://github.com/jonathanyc/car"
 bug-reports: "https://github.com/jonathanyc/car/issues"
 license: "BSD 2-Clause"
 dev-repo: "git@github.com:jonathanyc/car.git"
-build: []
+build: [
+  "./build"
+]
 depends: [
   "ocamlfind" {build}
 ]

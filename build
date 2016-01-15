@@ -1,0 +1,7 @@
+#!/bin/bash
+
+HEAD_END=$(grep -n 'end script header' car | awk -F: '{ print $1 }')
+TAIL_START=$((HEAD_END + 1))
+
+sed "1,${TAIL_START}d" car > car.ml
+ocamlbuild -use-ocamlfind -pkg str -pkg unix car.native

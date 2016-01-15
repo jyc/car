@@ -1,6 +1,7 @@
 #!/usr/bin/env utop
 #require "unix"
 #require "str"
+(* end script header *)
 
 (* car: A collection of aliases for common tasks on OCaml projects using ocamlbuild.
    (cons was taken!)
@@ -48,6 +49,7 @@ type config = {
   flags : string list;
 
   args : string list;
+  run_args : string list;
 }
 
 let (@.) f g x = f (g x)
@@ -254,7 +256,8 @@ let load_config () =
       package = required @@ load_string "package";
       requires = required @@ load_strings "requires";
       flags = optional ~default:[] @@ load_strings "flags";
-      args = [] }
+      args = [];
+      run_args = [] }
   with e ->
       error @@ sprintf "Error while loading configuration: %s" (Printexc.to_string e)
 
@@ -644,11 +647,13 @@ let rules =
          if not (Sys.file_exists s) then
            error @@ sprintf "Couldn't find a file named %s.ml." s
          else
-           let out = "./" ^ Filename.chop_extension s ^ ".d.byte" in
+           let out = Filename.chop_extension s ^ ".d.byte" in
            with_log_commands false
              (fun () ->
                 ocb ~flags ~quiet:true out ;
-                run @@ {|OCAMLRUNPARAM="b" |} ^ out ;
+                chdir ".." ;
+                run @@ sprintf "OCAMLRUNPARAM=b %s/%s" src_dir out ;
+                chdir src_dir ;
                 run @@ "rm " ^ out)));
   ]
 
@@ -746,6 +751,16 @@ let parse_arg s =
   | [rule] -> Some (rule, [])
   | _ -> None
 
+let split_argv () =
+  let rec split a i =
+    if i = Array.length Sys.argv then (a, [])
+    else if Sys.argv.(i) = "--" then
+      (List.rev a,
+       Array.sub Sys.argv (i + 1) (Array.length Sys.argv - i - 1)
+       |> Array.to_list)
+    else split (Sys.argv.(i) :: a) (i + 1)
+  in split [] 1
+
 (* Here we go! *)
 let () =
   let asking_for_help =
@@ -762,17 +777,14 @@ let () =
     chdir src_dir ;
     if argc = 1 then rule_all config
     else begin
-      let commands =
-        (Array.sub Sys.argv 1 (argc - 1))
-        |> Array.to_list
-        |> List.map parse_arg
-      in
+      let commands, run_args = split_argv () in
+      let commands = List.map parse_arg commands in
       if List.exists (function None -> true | _ -> false) commands then
         help ()
       else
         commands
         |> List.map (function Some x -> x | None -> assert false)
-        |> List.iter (fun (name, args) -> rule { config with args } name)
+        |> List.iter (fun (name, args) -> rule { config with args; run_args } name)
     end
   end
 
