@@ -753,12 +753,14 @@ let parse_arg s =
 
 let split_argv () =
   let rec split a i =
-    if i = Array.length Sys.argv then (a, [])
+    if i = Array.length Sys.argv then
+      (List.rev a, [])
     else if Sys.argv.(i) = "--" then
       (List.rev a,
        Array.sub Sys.argv (i + 1) (Array.length Sys.argv - i - 1)
        |> Array.to_list)
-    else split (Sys.argv.(i) :: a) (i + 1)
+    else
+      split (Sys.argv.(i) :: a) (i + 1)
   in split [] 1
 
 (* Here we go! *)
