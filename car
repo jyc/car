@@ -164,6 +164,7 @@ let rec parse_list chars =
     | ' ' :: cs -> loop i entries cs
     | '\n' :: cs -> loop (i + 1) entries cs
     | ']' :: cs -> `Ok (i, `List entries, cs)
+    | '#' :: cs -> loop (i + 1) entries cs
     | _ :: _ as cs ->
       begin match parse_value cs with
         | `Fail (j, s) -> `Fail (i + j, s)
@@ -194,13 +195,13 @@ let parse_carfile path =
     match chars with
     | ('a'..'z' | 'A'..'Z') :: _ as cs ->
       begin match parse_key cs with
-        | `Ok (j0, `Key s, cs) ->
-          begin match parse_value cs with
-            | `Ok (j1, v, cs) ->
-              loop (i + j0 + j1) ((s, v) :: kvs) cs
-            | `Fail (j1, s) -> `Error (sprintf "%s:%d: %s" path (i + j0 + j1) s)
-          end
-        | `Fail (j0, s) -> `Error (sprintf "%s:%d: %s" path (i + j0) s)
+      | `Ok (j0, `Key s, cs) ->
+        begin match parse_value cs with
+        | `Ok (j1, v, cs) ->
+          loop (i + j0 + j1) ((s, v) :: kvs) cs
+        | `Fail (j1, s) -> `Error (sprintf "%s:%d: %s" path (i + j0 + j1) s)
+        end
+      | `Fail (j0, s) -> `Error (sprintf "%s:%d: %s" path (i + j0) s)
       end
     | '#' :: cs ->
       let rec eat = function
