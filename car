@@ -633,10 +633,12 @@ let rules =
          (fun () ->
             List.iter
               (fun test ->
-                 let out = "./" ^ Filename.chop_extension test ^ ".d.byte" in
+                 let out = Filename.chop_extension test ^ ".d.byte" in
                  note "Test" "%s" test ;
                  ocb ~flags ~quiet:true out ;
-                 run ({|OCAMLRUNPARAM="b" |} ^ out) ;
+                 chdir ".." ;
+                 run ({|OCAMLRUNPARAM="b" |} ^ Filename.concat src_dir out) ;
+                 chdir src_dir ;
                  run ("rm " ^ out))
               test_files)));
 

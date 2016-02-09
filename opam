@@ -1,6 +1,6 @@
 opam-version: "1.2"
 name: "car"
-version: "2.2.3"
+version: "3.0.0"
 maintainer: "Jonathan Chan <jyc@fastmail.fm>"
 authors: "Jonathan Chan <jyc@fastmail.fm>"
 homepage: "https://github.com/jonathanyc/car"
