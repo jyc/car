@@ -163,17 +163,22 @@ let rec parse_list chars =
   let rec loop i entries = function
     | ' ' :: cs -> loop i entries cs
     | '\n' :: cs -> loop (i + 1) entries cs
-    | ']' :: cs -> `Ok (i, `List entries, cs)
-    | '#' :: cs -> loop (i + 1) entries cs
+    | ']' :: cs -> `Ok (i, `List (List.rev entries), cs)
+    | '#' :: cs -> 
+      let rec eat = function
+        | '\n' :: cs -> loop (i + 1) entries cs
+        | _ :: cs -> eat cs
+        | [] -> `Fail (i, "Unexpected EOF.")
+      in eat cs
     | _ :: _ as cs ->
       begin match parse_value cs with
-        | `Fail (j, s) -> `Fail (i + j, s)
-        | `Ok (j, x, cs) ->
-          begin match cs with
-            | (',' :: cs) | (_ :: _ as cs) ->
-              loop (i + j) (x :: entries) cs
-            | [] -> `Fail (i + j, "Unexpected EOF.")
-          end
+      | `Fail (j, s) -> `Fail (i + j, s)
+      | `Ok (j, x, cs) ->
+        begin match cs with
+        | (',' :: cs) | (_ :: _ as cs) ->
+          loop (i + j) (x :: entries) cs
+        | [] -> `Fail (i + j, "Unexpected EOF.")
+        end
       end
     | [] -> `Fail (i, "Unexpected EOF.")
   in loop 0 [] chars
