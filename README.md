@@ -53,5 +53,5 @@ In `src/project_top.ml` (replace `project` with the name of your project):
 `project_top.ml` file is ignored when building your project as a library.
 
 After running `car topgen`, you can run `car top` to build your own custom
-toplevel. You can run it with `./project.top` (where `project` is your
-project's name).
+toplevel using UTop (car will add the UTop package to the build flags, so you don't need it in your `requires` directive).
+You can run it with `./project.top` (where `project` is your project's name).

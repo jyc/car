@@ -546,7 +546,7 @@ let rules =
     fun { project; flags } ->
       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
         (fun () ->
-           ocb ~flags @@ sprintf "%s.top" project ;
+           ocb ~flags:("-pkg utop" :: flags) @@ sprintf "%s.top" project ;
            install (sprintf "%s.top" project))) ;
 
    ("topgen",
