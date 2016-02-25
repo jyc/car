@@ -307,6 +307,32 @@ let run_status cmd =
   | _ ->
     error @@ sprintf "Command failed: '%s' exited abnormally." cmd
 
+(* TODO: document. *)
+let run' ?(env=[]) ?(args=[]) cmd =
+  if !log_commands then
+    print_endline cmd ;
+
+  let args' = Array.of_list (cmd :: args) in
+  let env' =
+    Array.append
+      (Array.of_list env)
+      (Unix.environment ())
+  in
+
+  let pid = Unix.fork () in
+
+  if pid = 0 then begin
+    (* We're the child. *)
+    Unix.execvpe cmd args' env'
+  end ;
+
+  match Unix.waitpid [] pid with
+  | _, WEXITED 0 -> ()
+  | _, WEXITED x ->
+    error @@ sprintf "Command failed: '%s' exited with code %d." cmd x
+  | _ ->
+    error @@ sprintf "Command failed: '%s' exited abnormally." cmd
+
 (** [has_package name] returns [true] if the package [name] is known to
     ocamlfind. *)
 let has_package name =
@@ -546,8 +572,9 @@ let rules =
     fun { project; flags } ->
       with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
         (fun () ->
-           ocb ~flags:("-pkg utop" :: flags) @@ sprintf "%s.top" project ;
-           install (sprintf "%s.top" project))) ;
+           let flags = "-pkg utop" :: "-tag thread" :: flags in
+           ocb ~flags @@ sprintf "%s.top" project ;
+           install @@ sprintf "%s.top" project)) ;
 
    ("topgen",
     "Splice support code for a toplevel in .ocamlinit and _top.ml.",
@@ -556,13 +583,6 @@ let rules =
       let topfile = project ^ "_top.ml" in  
       splice_file ~ml:true "../.ocamlinit" "topgen" "#thread\n#directory \"src/_build\"" ;
       splice_file ~ml:true topfile "topgen" "let () = UTop_main.main ()" ;
-      if not (List.mem "utop" requires) then begin
-        note "topgen" "I noticed that 'utop' isn't contained in 'requies' in %s." config_path ;
-        note "topgen" "You add it now if want to use the generated %s," topfile ;
-        note "topgen" "or delete it if you don't want to use UTop." ;
-        note "topgen" "UTop also expects threads to be enabled." ;
-        note "topgen" "If you haven't already, you can add the line 'true: thread' to _tags." ;
-      end
    ) ;
 
    (* doc runs ocamldoc on all of the modules in your project except for *_test
@@ -645,7 +665,7 @@ let rules =
    ("run",
     "Run main or a specified file.",
     Run,
-    (fun { flags; args } ->
+    (fun { flags; args; run_args } ->
        let target =
          match args with
          | [] -> Some "main.ml"
@@ -664,7 +684,8 @@ let rules =
              (fun () ->
                 ocb ~flags ~quiet:true out ;
                 chdir ".." ;
-                run @@ sprintf "OCAMLRUNPARAM=b %s/%s" src_dir out ;
+                run' ~env:["OCAMLRUNPARAM=b"] ~args:run_args
+                  (sprintf "%s/%s" src_dir out) ;
                 chdir src_dir ;
                 run @@ "rm " ^ out)));
   ]
