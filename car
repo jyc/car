@@ -376,13 +376,15 @@ let write_to_file path s =
   output_string och s ;
   close_out och
 
+
+
 (** [modules ()] returns a list of the OCaml modules in the current directory.
     It does this by finding all the .ml files and calling [mcase] on the
     filenames. *)
 let modules () =
   Sys.readdir "."
   |> Array.to_list
-  |> List.filter (fun s -> Filename.check_suffix s ".ml")
+  |> List.filter (fun s -> List.exists (Filename.check_suffix s) [".ml"; ".mly"; ".mll"])
   |> List.map Filename.chop_extension
   |> List.map mcase
 
