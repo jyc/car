@@ -35,6 +35,29 @@ To create an initial `car.toml` file you can run `./car init`.
 You can also install `car` to somewhere on `$PATH` and do `car` instead of
 `./car`, although then you won't be able to make customizations per-project.
 
+## Help text
+
+This is the standard helptext which should give a brief description of the functions of `car`.
+
+    Usage car [rule]*
+    A collection of aliases for common tasks on OCaml projects using ocamlbuild.
+    
+    init    Create an initial _car file.
+    gen     Generate a META file and dependency lists in .merlin, and _tags.
+    reqs    Print a list of the required packages listed in the config.
+    clean   Delete binaries created by other commands.
+    byte    Build main.d.byte from src/main.ml.
+    opt     Build main.native from main.ml.
+    top     Build a toplevel.
+    topgen  Splice support code for a toplevel in .ocamlinit and _top.ml.
+    doc     Build project documentation.
+    lib     Install project modules as an ocamlfind package.
+    unlib   Delete the ocamlfind package created by lib.
+    test    Run test files.
+    run     Run main or a specified file.
+    
+    If you don't supply a rule, all rules will run but: gen, reqs, clean, topgen, lib, unlib, run.
+
 # Building a toplevel
 
 If you want to build a toplevel using `car top`, running `car topgen` will
