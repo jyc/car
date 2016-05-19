@@ -481,7 +481,7 @@ let splice_file ?(ml=false) path tag s =
 
 (* A list of file extensions of artifacts to install with ocamlfind. *)
 let desired_artifacts =
-  [".cmi"; ".cmt"; ".ml"; ".mli"; ".cma"; ".cmxa"; ".a"]
+  [".cmi"; ".cmt"; ".ml"; ".mli"; ".cma"; ".cmx"; ".cmxa"; ".a"]
 
 (** [rules] is a alist of (name, group, procedure) tuples. Each specifies a
     subcommand for mk. For example, ./mk splice will call the procedure whose
