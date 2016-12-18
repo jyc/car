@@ -553,7 +553,7 @@ let rules =
    (* top builds a custom toplevel, [project].top containing all the modules in
       the project except for Main and *_test.
 
-      topgen will splice into [mcase project]_top.ml the following line:
+      topgen will splice into [project]_top.ml the following line:
 
           let () = UTop_main.main ()
 
@@ -572,8 +572,19 @@ let rules =
     "Build a toplevel.",
     Build,
     fun { project; flags } ->
-      with_module_list ~excludes:["Main"] ~dest:(sprintf "%s.mltop" project)
+      let mltop = sprintf "%s.mltop" project in
+      with_module_list ~excludes:["Main"; mcase project ^ "_top"] ~dest:mltop
         (fun () ->
+           (* Append "[project]_top.ml\n" to the file at [mltop] we just
+              created. We excluded it using ~excludes and now append it so that
+              it will be linked last, which is necessary. [1]
+
+              [1]: https://github.com/diml/utop/issues/95
+           *)
+           let out = open_out_gen [Open_append] 0644 mltop in
+           output_string out (mcase project ^ "_top\n") ;
+           close_out out ;
+
            let flags = "-pkg utop" :: "-tag thread" :: flags in
            ocb ~flags @@ sprintf "%s.top" project ;
            install @@ sprintf "%s.top" project)) ;
